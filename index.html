@@ -1,31 +1,77 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Jearnell Ken Time Tracker</title>
+
 <style>
   body { font-family: Arial, sans-serif; margin:0; padding:0; background:#f5f5f5; }
   header { background:#1e3a8a; color:white; padding:20px; text-align:center; }
-  .container { max-width:900px; margin:20px auto; background:white; padding:20px; border-radius:10px; }
+  .container { max-width:980px; margin:20px auto; background:white; padding:20px; border-radius:10px; }
   input, select, button { padding:10px; margin:5px 0; border-radius:5px; border:1px solid #ccc; }
   button { background:#1e3a8a; color:white; border:none; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:not-allowed; }
   table { width:100%; border-collapse: collapse; margin-top:20px; }
-  th, td { border:1px solid #ddd; padding:8px; text-align:left; }
+  th, td { border:1px solid #ddd; padding:8px; text-align:left; vertical-align: top; }
   th { background:#f0f0f0; }
-  .dashboard { display:flex; justify-content:space-around; margin-top:20px; }
-  .dash-box { background:#e0e7ff; padding:15px; border-radius:8px; width:45%; text-align:center; }
-  .dash-box h2 { margin:0 0 10px 0; font-size:18px; color:#1e3a8a; }
-  .dash-box p { margin:0; font-size:16px; }
+
+  /* ACTION DROPDOWN */
+  .action-wrap { position:relative; display:inline-block; }
+  .action-btn { padding:8px 12px; font-weight:600; }
+
+  .dropdown {
+    position:absolute; right:0; top:42px;
+    background:#fff; border:1px solid #ddd; border-radius:10px;
+    box-shadow:0 10px 25px rgba(0,0,0,.15);
+    min-width:170px; display:none; z-index:100; overflow:hidden;
+  }
+  .dropdown.open { display:block; }
+  .dropdown button {
+    width:100%;
+    background:none;
+    color:#111;
+    border:none;
+    padding:10px 12px;
+    text-align:left;
+    margin:0;
+  }
+  .dropdown button:hover { background:#f3f4f6; }
+  .dropdown .danger { color:#b91c1c; }
+  .dropdown hr { margin:0; border:none; height:1px; background:#eee; }
+
+  /* EDIT MODAL */
+  .backdrop{
+    position:fixed; inset:0; background:rgba(0,0,0,.45);
+    display:none; align-items:center; justify-content:center;
+    z-index:1000; padding:16px;
+  }
+  .backdrop.show{ display:flex; }
+  .modal{
+    width:100%; max-width:560px;
+    background:#fff; border-radius:14px;
+    box-shadow:0 20px 50px rgba(0,0,0,.25);
+    padding:16px;
+  }
+  .modal h3{ margin:0 0 10px 0; }
+  .grid{ display:flex; gap:12px; flex-wrap:wrap; }
+  .field{ flex:1; min-width:240px; }
+  .modal label{ display:block; font-size:12px; color:#444; margin:8px 0 4px; }
+  .modal input, .modal select { width:100%; box-sizing:border-box; }
+  .hint{ font-size:12px; color:#555; margin-top:6px; }
+  .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:14px; }
+  .btn-secondary{ background:#e5e7eb; color:#111; border:1px solid #d1d5db; }
 </style>
 </head>
+
 <body>
 <header>
   <h1>Jearnell Ken Time Tracker</h1>
 </header>
+
 <div class="container">
   <h2>Add Task</h2>
-  <input type="text" id="taskName" placeholder="Task Name">
+  <input type="text" id="taskName" placeholder="Task Name" />
   <select id="taskCategory">
     <option value="Work">Work</option>
     <option value="Study">Study</option>
@@ -34,127 +80,331 @@
   </select>
   <button onclick="startTask()">Start Task</button>
 
-  <div class="dashboard">
-    <div class="dash-box">
-      <h2>Today's Time</h2>
-      <p id="todayTime">00:00:00</p>
-    </div>
-    <div class="dash-box">
-      <h2>This Week</h2>
-      <p id="weekTime">00:00:00</p>
-    </div>
-  </div>
-
   <h2>Tasks</h2>
   <table>
     <thead>
-      <tr><th>Task</th><th>Category</th><th>Start</th><th>End</th><th>Duration</th><th>Action</th></tr>
+      <tr>
+        <th>Task</th>
+        <th>Category</th>
+        <th>Start</th>
+        <th>Status</th>
+        <th>Duration</th>
+        <th>Action</th>
+      </tr>
     </thead>
     <tbody id="tasksTable"></tbody>
   </table>
 </div>
 
+<!-- EDIT MODAL -->
+<div id="editBackdrop" class="backdrop" onclick="closeEditModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <h3>Edit Task (Fix Time)</h3>
+
+    <div class="grid">
+      <div class="field">
+        <label>Task Name</label>
+        <input id="editName" type="text" />
+      </div>
+
+      <div class="field">
+        <label>Category</label>
+        <select id="editCategory">
+          <option value="Work">Work</option>
+          <option value="Study">Study</option>
+          <option value="Exercise">Exercise</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>Start Time (local)</label>
+        <input id="editStart" type="datetime-local" />
+      </div>
+
+      <div class="field">
+        <label>Duration (HH:MM:SS)</label>
+        <input id="editDuration" type="text" placeholder="00:30:00" />
+        <div class="hint">
+          This directly edits the Duration you see in the table (fix mistakes).
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+      <button onclick="saveEdit()">Save</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
 
-function saveTasks() {
+/*
+Task shape:
+{
+  name, category,
+  createdAtISO,
+  status: "running" | "paused" | "stopped",
+  lastStartISO: string|null,  // when it last started/resumed (only if running)
+  elapsedMs: number           // accumulated time while paused/stopped + completed chunks
+}
+*/
+
+function save() {
   localStorage.setItem('tasks', JSON.stringify(tasks));
-  renderTasks();
-  updateDashboard();
+  render();
 }
 
-function startTask() {
-  const name = document.getElementById('taskName').value.trim();
-  const category = document.getElementById('taskCategory').value;
-  if(!name) return alert('Enter task name');
-  tasks.push({name, category, start: new Date().toISOString(), end: null});
-  document.getElementById('taskName').value = '';
-  saveTasks();
-}
-
-function stopTask(index) {
-  tasks[index].end = new Date().toISOString();
-  saveTasks();
-}
-
-function deleteTask(index) {
-  tasks.splice(index, 1);
-  saveTasks();
-}
-
-// Format HH:MM:SS
+/* ---------- duration helpers ---------- */
 function formatDuration(ms) {
-  let totalSeconds = Math.floor(ms / 1000);
-  let hrs = Math.floor(totalSeconds / 3600).toString().padStart(2,'0');
-  let mins = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2,'0');
-  let secs = (totalSeconds % 60).toString().padStart(2,'0');
+  ms = Math.max(0, ms);
+  const totalSeconds = Math.floor(ms / 1000);
+  const hrs = String(Math.floor(totalSeconds / 3600)).padStart(2,'0');
+  const mins = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2,'0');
+  const secs = String(totalSeconds % 60).padStart(2,'0');
   return `${hrs}:${mins}:${secs}`;
 }
 
-function getTaskDuration(task) {
-  const endTime = task.end ? new Date(task.end) : new Date();
-  return endTime - new Date(task.start);
+function parseHHMMSS(str) {
+  // accepts "H:MM:SS" or "HH:MM:SS"
+  const s = (str || '').trim();
+  const m = s.match(/^(\d+):([0-5]?\d):([0-5]?\d)$/);
+  if (!m) return null;
+  const h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  const sec = parseInt(m[3], 10);
+  return ((h * 3600) + (min * 60) + sec) * 1000;
 }
 
-function renderTasks() {
+function getDurationMs(task) {
+  const base = task.elapsedMs || 0;
+  if (task.status === 'running' && task.lastStartISO) {
+    return base + (Date.now() - new Date(task.lastStartISO).getTime());
+  }
+  return base;
+}
+
+/* ---------- dropdown behavior ---------- */
+function closeAllDropdowns() {
+  document.querySelectorAll('.dropdown.open').forEach(d => d.classList.remove('open'));
+}
+
+function toggleDropdown(i) {
+  const dd = document.getElementById('dd-' + i);
+  if (!dd) return;
+
+  const isOpen = dd.classList.contains('open');
+  closeAllDropdowns();
+  if (!isOpen) dd.classList.add('open');
+}
+
+// close only when clicking outside action area
+document.addEventListener('click', e => {
+  if (!e.target.closest('.action-wrap')) closeAllDropdowns();
+});
+
+/* ---------- task actions ---------- */
+function startTask() {
+  const name = document.getElementById('taskName').value.trim();
+  const category = document.getElementById('taskCategory').value;
+  if (!name) return alert('Enter task name');
+
+  const nowISO = new Date().toISOString();
+
+  tasks.push({
+    name,
+    category,
+    createdAtISO: nowISO,
+    status: 'running',
+    lastStartISO: nowISO,
+    elapsedMs: 0
+  });
+
+  document.getElementById('taskName').value = '';
+  save();
+}
+
+function pauseTask(i) {
+  closeAllDropdowns();
+  const t = tasks[i];
+  if (!t || t.status !== 'running') return;
+
+  if (t.lastStartISO) {
+    t.elapsedMs = (t.elapsedMs || 0) + (Date.now() - new Date(t.lastStartISO).getTime());
+  }
+  t.status = 'paused';
+  t.lastStartISO = null;
+  save();
+}
+
+function resumeTask(i) {
+  closeAllDropdowns();
+  const t = tasks[i];
+  if (!t || t.status !== 'paused') return;
+
+  t.status = 'running';
+  t.lastStartISO = new Date().toISOString();
+  save();
+}
+
+function stopTask(i) {
+  closeAllDropdowns();
+  const t = tasks[i];
+  if (!t || t.status === 'stopped') return;
+
+  if (t.status === 'running' && t.lastStartISO) {
+    t.elapsedMs = (t.elapsedMs || 0) + (Date.now() - new Date(t.lastStartISO).getTime());
+  }
+  t.status = 'stopped';
+  t.lastStartISO = null;
+  save();
+}
+
+function deleteTask(i) {
+  closeAllDropdowns();
+  tasks.splice(i, 1);
+  save();
+}
+
+/* ---------- Edit Modal tied to Duration ---------- */
+let editingIndex = null;
+
+function toLocalInputValue(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  const pad = (n) => String(n).padStart(2,'0');
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth()+1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
+
+function fromLocalInputValue(val) {
+  if (!val) return null;
+  const d = new Date(val); // local time
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function openEdit(i) {
+  closeAllDropdowns();
+  editingIndex = i;
+  const t = tasks[i];
+
+  document.getElementById('editName').value = t.name || '';
+  document.getElementById('editCategory').value = t.category || 'Work';
+  document.getElementById('editStart').value = toLocalInputValue(t.createdAtISO);
+
+  // IMPORTANT: show duration as it appears in Duration tab
+  document.getElementById('editDuration').value = formatDuration(getDurationMs(t));
+
+  document.getElementById('editBackdrop').classList.add('show');
+}
+
+function closeEditModal(evt) {
+  if (evt && evt.target && !evt.target.classList.contains('backdrop')) return;
+  document.getElementById('editBackdrop').classList.remove('show');
+  editingIndex = null;
+}
+
+function saveEdit() {
+  if (editingIndex === null) return;
+  const t = tasks[editingIndex];
+
+  const newName = document.getElementById('editName').value.trim();
+  const newCategory = document.getElementById('editCategory').value;
+  const newStartISO = fromLocalInputValue(document.getElementById('editStart').value);
+  const newDurMs = parseHHMMSS(document.getElementById('editDuration').value);
+
+  if (!newName) return alert('Task name cannot be empty.');
+  if (!newStartISO) return alert('Start time is invalid. Try selecting it again.');
+  if (newDurMs === null) return alert('Duration must be HH:MM:SS (example: 01:15:30).');
+
+  // Apply edits
+  t.name = newName;
+  t.category = newCategory;
+  t.createdAtISO = newStartISO;
+
+  // Tie EDIT directly to Duration tab:
+  // Set elapsedMs to the duration the user entered.
+  t.elapsedMs = newDurMs;
+
+  // If task is running, make it continue from "now" with the duration as base.
+  // That means: elapsedMs already includes all time so far, then it starts counting again.
+  if (t.status === 'running') {
+    t.lastStartISO = new Date().toISOString();
+  } else {
+    t.lastStartISO = null;
+  }
+
+  save();
+  closeEditModal();
+}
+
+/* ---------- render ---------- */
+function render() {
   const tbody = document.getElementById('tasksTable');
   tbody.innerHTML = '';
-  tasks.forEach((t,i) => {
-    const start = new Date(t.start).toLocaleString();
-    const end = t.end ? new Date(t.end).toLocaleString() : '-';
-    const duration = formatDuration(getTaskDuration(t));
-    const actionBtns = t.end 
-      ? `<button onclick="deleteTask(${i})">Delete</button>`
-      : `<button onclick="stopTask(${i})">Stop</button> <button onclick="deleteTask(${i})">Delete</button>`;
-    tbody.innerHTML += `<tr>
-      <td>${t.name}</td>
-      <td>${t.category}</td>
-      <td>${start}</td>
-      <td>${end}</td>
-      <td>${duration}</td>
-      <td>${actionBtns}</td>
-    </tr>`;
+
+  tasks.forEach((t, i) => {
+    const startStr = new Date(t.createdAtISO).toLocaleString();
+    const status = t.status || 'running';
+    const durationStr = formatDuration(getDurationMs(t));
+
+    // Actions: Always include Edit + Delete. Pause/Resume/Stop depends on status.
+    let menu = '';
+
+    if (status === 'running') {
+      menu += `<button onclick="pauseTask(${i})">Pause</button><hr>`;
+      menu += `<button onclick="stopTask(${i})">Stop</button><hr>`;
+    } else if (status === 'paused') {
+      menu += `<button onclick="resumeTask(${i})">Resume</button><hr>`;
+      menu += `<button onclick="stopTask(${i})">Stop</button><hr>`;
+    } else {
+      // stopped: no pause/resume, but still edit + delete
+    }
+
+    // Edit should always exist (even after stop)
+    menu += `<button onclick="openEdit(${i})">Edit</button><hr>`;
+    menu += `<button class="danger" onclick="deleteTask(${i})">Delete</button>`;
+
+    tbody.innerHTML += `
+      <tr>
+        <td>${t.name}</td>
+        <td>${t.category}</td>
+        <td>${startStr}</td>
+        <td>${status}</td>
+        <td><span id="dur-${i}">${durationStr}</span></td>
+        <td>
+          <div class="action-wrap">
+            <button class="action-btn" onclick="toggleDropdown(${i}); event.stopPropagation()">
+              Actions ▾
+            </button>
+            <div class="dropdown" id="dd-${i}">
+              ${menu}
+            </div>
+          </div>
+        </td>
+      </tr>
+    `;
   });
 }
 
-function updateDashboard() {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - now.getDay());
-
-  let todayMs = 0;
-  let weekMs = 0;
-
-  tasks.forEach(t => {
-    const duration = getTaskDuration(t);
-    const start = new Date(t.start);
-    if(start >= todayStart) todayMs += duration;
-    if(start >= weekStart) weekMs += duration;
+/* live duration update (without re-rendering menu) */
+function tickDurations() {
+  tasks.forEach((t, i) => {
+    const el = document.getElementById(`dur-${i}`);
+    if (!el) return;
+    el.textContent = formatDuration(getDurationMs(t));
   });
-
-  document.getElementById('todayTime').innerText = formatDuration(todayMs);
-  document.getElementById('weekTime').innerText = formatDuration(weekMs);
 }
 
-function checkDailyReset() {
-  const lastDate = localStorage.getItem('lastDate');
-  const todayStr = new Date().toDateString();
-  if(lastDate !== todayStr) {
-    localStorage.setItem('lastDate', todayStr);
-    updateDashboard();
-  }
-}
-
-setInterval(()=>{
-  renderTasks();
-  updateDashboard();
-  checkDailyReset();
-}, 1000);
-
-checkDailyReset();
-renderTasks();
-updateDashboard();
+render();
+setInterval(tickDurations, 1000);
 </script>
 </body>
 </html>
