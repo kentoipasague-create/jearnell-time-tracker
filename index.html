@@ -48,17 +48,17 @@
   }
   .backdrop.show{ display:flex; }
   .modal{
-    width:100%; max-width:560px;
+    width:100%; max-width:620px;
     background:#fff; border-radius:14px;
     box-shadow:0 20px 50px rgba(0,0,0,.25);
     padding:16px;
   }
   .modal h3{ margin:0 0 10px 0; }
   .grid{ display:flex; gap:12px; flex-wrap:wrap; }
-  .field{ flex:1; min-width:240px; }
+  .field{ flex:1; min-width:260px; }
   .modal label{ display:block; font-size:12px; color:#444; margin:8px 0 4px; }
   .modal input, .modal select { width:100%; box-sizing:border-box; }
-  .hint{ font-size:12px; color:#555; margin-top:6px; }
+  .hint{ font-size:12px; color:#555; margin-top:6px; line-height:1.35; }
   .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:14px; }
   .btn-secondary{ background:#e5e7eb; color:#111; border:1px solid #d1d5db; }
 </style>
@@ -87,7 +87,7 @@
         <th>Task</th>
         <th>Category</th>
         <th>Start</th>
-        <th>Status</th>
+        <th>End</th>
         <th>Duration</th>
         <th>Action</th>
       </tr>
@@ -118,15 +118,22 @@
       </div>
 
       <div class="field">
-        <label>Start Time (local)</label>
+        <label>Start (local)</label>
         <input id="editStart" type="datetime-local" />
       </div>
 
       <div class="field">
-        <label>Duration (HH:MM:SS)</label>
+        <label>End (local) — optional</label>
+        <input id="editEnd" type="datetime-local" />
+      </div>
+
+      <div class="field">
+        <label>Duration (HH:MM:SS) — optional</label>
         <input id="editDuration" type="text" placeholder="00:30:00" />
         <div class="hint">
-          This directly edits the Duration you see in the table (fix mistakes).
+          You can fix mistakes either by setting <b>Start + End</b> (Duration auto-calculates)
+          or setting <b>Start + Duration</b> (End auto-calculates). If you fill both End and Duration,
+          End wins.
         </div>
       </div>
     </div>
@@ -139,25 +146,63 @@
 </div>
 
 <script>
-let tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
-
 /*
-Task shape:
+New task shape:
 {
   name, category,
-  createdAtISO,
+  createdAtISO,           // Start
+  endISO: string|null,    // End (set when stopped or edited)
   status: "running" | "paused" | "stopped",
-  lastStartISO: string|null,  // when it last started/resumed (only if running)
-  elapsedMs: number           // accumulated time while paused/stopped + completed chunks
+  lastStartISO: string|null, // when it last started/resumed (only if running)
+  elapsedMs: number          // accumulated duration while paused/stopped + completed chunks
 }
 */
+
+let tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
+
+/* ✅ One-time migration: old {start,end} format -> new format */
+tasks = tasks.map(t => {
+  // already new format
+  if ('elapsedMs' in t && 'createdAtISO' in t) return t;
+
+  const start = new Date(t.start);
+  const end = t.end ? new Date(t.end) : null;
+
+  let elapsedMs = 0;
+  let status = 'stopped';
+  let lastStartISO = null;
+  let endISO = null;
+
+  if (end) {
+    elapsedMs = end.getTime() - start.getTime();
+    status = 'stopped';
+    endISO = end.toISOString();
+  } else {
+    // old code had a running task with end = null
+    elapsedMs = Date.now() - start.getTime();
+    status = 'running';
+    lastStartISO = new Date().toISOString();
+    endISO = null;
+  }
+
+  return {
+    name: t.name,
+    category: t.category || 'Other',
+    createdAtISO: start.toISOString(),
+    endISO,
+    status,
+    lastStartISO,
+    elapsedMs: Math.max(0, elapsedMs)
+  };
+});
+localStorage.setItem('tasks', JSON.stringify(tasks));
 
 function save() {
   localStorage.setItem('tasks', JSON.stringify(tasks));
   render();
 }
 
-/* ---------- duration helpers ---------- */
+/* ---------- time helpers ---------- */
 function formatDuration(ms) {
   ms = Math.max(0, ms);
   const totalSeconds = Math.floor(ms / 1000);
@@ -168,8 +213,8 @@ function formatDuration(ms) {
 }
 
 function parseHHMMSS(str) {
-  // accepts "H:MM:SS" or "HH:MM:SS"
   const s = (str || '').trim();
+  if (!s) return null;
   const m = s.match(/^(\d+):([0-5]?\d):([0-5]?\d)$/);
   if (!m) return null;
   const h = parseInt(m[1], 10);
@@ -200,7 +245,6 @@ function toggleDropdown(i) {
   if (!isOpen) dd.classList.add('open');
 }
 
-// close only when clicking outside action area
 document.addEventListener('click', e => {
   if (!e.target.closest('.action-wrap')) closeAllDropdowns();
 });
@@ -217,6 +261,7 @@ function startTask() {
     name,
     category,
     createdAtISO: nowISO,
+    endISO: null,
     status: 'running',
     lastStartISO: nowISO,
     elapsedMs: 0
@@ -236,6 +281,7 @@ function pauseTask(i) {
   }
   t.status = 'paused';
   t.lastStartISO = null;
+  // End stays blank until stopped or edited
   save();
 }
 
@@ -246,6 +292,8 @@ function resumeTask(i) {
 
   t.status = 'running';
   t.lastStartISO = new Date().toISOString();
+  // If it was previously stopped/edited with an end, resume should clear end
+  t.endISO = null;
   save();
 }
 
@@ -259,6 +307,7 @@ function stopTask(i) {
   }
   t.status = 'stopped';
   t.lastStartISO = null;
+  t.endISO = new Date().toISOString();
   save();
 }
 
@@ -268,7 +317,7 @@ function deleteTask(i) {
   save();
 }
 
-/* ---------- Edit Modal tied to Duration ---------- */
+/* ---------- Edit Modal (linked to Start/End/Duration) ---------- */
 let editingIndex = null;
 
 function toLocalInputValue(isoStr) {
@@ -298,8 +347,7 @@ function openEdit(i) {
   document.getElementById('editName').value = t.name || '';
   document.getElementById('editCategory').value = t.category || 'Work';
   document.getElementById('editStart').value = toLocalInputValue(t.createdAtISO);
-
-  // IMPORTANT: show duration as it appears in Duration tab
+  document.getElementById('editEnd').value = toLocalInputValue(t.endISO);
   document.getElementById('editDuration').value = formatDuration(getDurationMs(t));
 
   document.getElementById('editBackdrop').classList.add('show');
@@ -317,28 +365,69 @@ function saveEdit() {
 
   const newName = document.getElementById('editName').value.trim();
   const newCategory = document.getElementById('editCategory').value;
-  const newStartISO = fromLocalInputValue(document.getElementById('editStart').value);
-  const newDurMs = parseHHMMSS(document.getElementById('editDuration').value);
+  const startISO = fromLocalInputValue(document.getElementById('editStart').value);
+  const endISOInput = fromLocalInputValue(document.getElementById('editEnd').value);
+  const durMsInput = parseHHMMSS(document.getElementById('editDuration').value);
 
   if (!newName) return alert('Task name cannot be empty.');
-  if (!newStartISO) return alert('Start time is invalid. Try selecting it again.');
-  if (newDurMs === null) return alert('Duration must be HH:MM:SS (example: 01:15:30).');
+  if (!startISO) return alert('Start time is invalid.');
+
+  const startMs = new Date(startISO).getTime();
+
+  // Decide how to compute duration/end:
+  // - If End provided: duration = End - Start
+  // - Else if Duration provided: end = Start + Duration (ONLY if you want a fixed End)
+  // - Else: keep as-is (for running/paused, you can leave End blank)
+  let newElapsedMs = null;
+  let newEndISO = null;
+
+  if (endISOInput) {
+    const endMs = new Date(endISOInput).getTime();
+    if (endMs < startMs) return alert('End must be after Start.');
+    newElapsedMs = endMs - startMs;
+    newEndISO = endISOInput;
+  } else if (durMsInput !== null) {
+    newElapsedMs = durMsInput;
+    // only set End automatically if the task is stopped; for running/paused keep End blank
+    if (t.status === 'stopped') {
+      newEndISO = new Date(startMs + newElapsedMs).toISOString();
+    } else {
+      newEndISO = null;
+    }
+  } else {
+    // neither end nor duration changed in a valid way
+    // keep existing duration/End values
+    newElapsedMs = (t.status === 'running')
+      ? (t.elapsedMs || 0) // keep base; live running continues
+      : (t.elapsedMs || 0);
+    newEndISO = t.endISO || null;
+  }
 
   // Apply edits
   t.name = newName;
   t.category = newCategory;
-  t.createdAtISO = newStartISO;
+  t.createdAtISO = startISO;
 
-  // Tie EDIT directly to Duration tab:
-  // Set elapsedMs to the duration the user entered.
-  t.elapsedMs = newDurMs;
+  // Link edit to Duration: store it in elapsedMs
+  t.elapsedMs = Math.max(0, newElapsedMs);
 
-  // If task is running, make it continue from "now" with the duration as base.
-  // That means: elapsedMs already includes all time so far, then it starts counting again.
-  if (t.status === 'running') {
-    t.lastStartISO = new Date().toISOString();
-  } else {
+  // End handling:
+  // - If task is stopped, keep/set End based on edit (or keep existing)
+  // - If running/paused, End should be blank unless user explicitly set one (then we stop it)
+  if (endISOInput) {
+    t.endISO = newEndISO;
+    t.status = 'stopped';
     t.lastStartISO = null;
+  } else {
+    if (t.status === 'stopped') {
+      t.endISO = newEndISO || t.endISO || null;
+      t.lastStartISO = null;
+    } else {
+      t.endISO = null;
+      // if running, keep it running from now
+      if (t.status === 'running') t.lastStartISO = new Date().toISOString();
+      if (t.status === 'paused') t.lastStartISO = null;
+    }
   }
 
   save();
@@ -352,23 +441,22 @@ function render() {
 
   tasks.forEach((t, i) => {
     const startStr = new Date(t.createdAtISO).toLocaleString();
-    const status = t.status || 'running';
+    const endStr = t.endISO ? new Date(t.endISO).toLocaleString() : '-';
     const durationStr = formatDuration(getDurationMs(t));
 
-    // Actions: Always include Edit + Delete. Pause/Resume/Stop depends on status.
+    // Actions: include pause/resume/stop as needed, ALWAYS include edit/delete
     let menu = '';
 
-    if (status === 'running') {
+    if (t.status === 'running') {
       menu += `<button onclick="pauseTask(${i})">Pause</button><hr>`;
       menu += `<button onclick="stopTask(${i})">Stop</button><hr>`;
-    } else if (status === 'paused') {
+    } else if (t.status === 'paused') {
       menu += `<button onclick="resumeTask(${i})">Resume</button><hr>`;
       menu += `<button onclick="stopTask(${i})">Stop</button><hr>`;
     } else {
-      // stopped: no pause/resume, but still edit + delete
+      // stopped: no pause/resume; still can edit/delete
     }
 
-    // Edit should always exist (even after stop)
     menu += `<button onclick="openEdit(${i})">Edit</button><hr>`;
     menu += `<button class="danger" onclick="deleteTask(${i})">Delete</button>`;
 
@@ -377,7 +465,7 @@ function render() {
         <td>${t.name}</td>
         <td>${t.category}</td>
         <td>${startStr}</td>
-        <td>${status}</td>
+        <td><span id="end-${i}">${endStr}</span></td>
         <td><span id="dur-${i}">${durationStr}</span></td>
         <td>
           <div class="action-wrap">
@@ -394,17 +482,19 @@ function render() {
   });
 }
 
-/* live duration update (without re-rendering menu) */
-function tickDurations() {
+/* live duration update (and end update after stop) */
+function tick() {
   tasks.forEach((t, i) => {
-    const el = document.getElementById(`dur-${i}`);
-    if (!el) return;
-    el.textContent = formatDuration(getDurationMs(t));
+    const durEl = document.getElementById(`dur-${i}`);
+    if (durEl) durEl.textContent = formatDuration(getDurationMs(t));
+
+    const endEl = document.getElementById(`end-${i}`);
+    if (endEl) endEl.textContent = t.endISO ? new Date(t.endISO).toLocaleString() : '-';
   });
 }
 
 render();
-setInterval(tickDurations, 1000);
+setInterval(tick, 1000);
 </script>
 </body>
 </html>
